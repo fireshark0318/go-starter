@@ -12,6 +12,7 @@ import (
 	"sync"
 	"testing"
 
+	"allaboutapps.dev/aw/go-starter/internal/config"
 	pUtil "allaboutapps.dev/aw/go-starter/internal/util"
 	dbutil "allaboutapps.dev/aw/go-starter/internal/util/db"
 	"github.com/allaboutapps/integresql-client-go"
@@ -29,7 +30,7 @@ var (
 	poolHashMap = &sync.Map{} // "poolID" -> "poolHash"
 
 	// we will compute a db template hash over the following dirs/files
-	migDir           = filepath.Join(pUtil.GetProjectRootDir(), "/migrations")
+	migDir           = config.DatabaseMigrationFolder
 	fixFile          = filepath.Join(pUtil.GetProjectRootDir(), "/internal/test/fixtures.go")
 	selfFile         = filepath.Join(pUtil.GetProjectRootDir(), "/internal/test/test_database.go")
 	defaultPoolPaths = []string{migDir, fixFile, selfFile}
@@ -42,16 +43,20 @@ func init() {
 		panic(errors.Wrap(err, "Failed to create new integresql-client"))
 	}
 	client = c
+
+	// pin migrate to use the globally defined `migrations` table identifier
+	migrate.SetTable(config.DatabaseMigrationTable)
 }
 
-// Use this utility func to test with an isolated test database based on your current migrations and fixtures.
+// WithTestDatabase returns an isolated test database based on the current migrations and fixtures.
 func WithTestDatabase(t *testing.T, closure func(db *sql.DB)) {
 	t.Helper()
 	ctx := context.Background()
 	WithTestDatabaseContext(ctx, t, closure)
 }
 
-// Use this utility func to test with an isolated test database based on your current migrations and fixtures (context injectable).
+// WithTestDatabaseContext returns an isolated test database based on the current migrations and fixtures.
+// The provided context will be used during setup (instead of the default background context).
 func WithTestDatabaseContext(ctx context.Context, t *testing.T, closure func(db *sql.DB)) {
 	t.Helper()
 
@@ -97,14 +102,15 @@ type DatabaseDumpConfig struct {
 	ApplyTestFixtures bool   // optional, default false
 }
 
-// Use this utility func to test with an isolated test database based on a dump file.
+// WithTestDatabaseFromDump returns an isolated test database based on a dump file.
 func WithTestDatabaseFromDump(t *testing.T, config DatabaseDumpConfig, closure func(db *sql.DB)) {
 	t.Helper()
 	ctx := context.Background()
 	WithTestDatabaseFromDumpContext(ctx, t, config, closure)
 }
 
-// Use this utility func to test with an isolated test database based on a dump file (context injectable).
+// WithTestDatabaseFromDumpContext returns an isolated test database based on a dump file.
+// The provided context will be used during setup (instead of the default background context).
 func WithTestDatabaseFromDumpContext(ctx context.Context, t *testing.T, config DatabaseDumpConfig, closure func(db *sql.DB)) {
 	t.Helper()
 
@@ -161,12 +167,15 @@ func WithTestDatabaseFromDumpContext(ctx context.Context, t *testing.T, config D
 	execClosureNewIntegresDatabase(ctx, t, getPoolHash(t, poolID), "WithTestDatabaseFromDump", closure)
 }
 
+// WithTestDatabaseEmpty returns an isolated test database with no migrations applied or fixtures inserted.
 func WithTestDatabaseEmpty(t *testing.T, closure func(db *sql.DB)) {
 	t.Helper()
 	ctx := context.Background()
 	WithTestDatabaseEmptyContext(ctx, t, closure)
 }
 
+// WithTestDatabaseEmptyContext returns an isolated test database with no migrations applied or fixtures inserted.
+// The provided context will be used during setup (instead of the default background context).
 func WithTestDatabaseEmptyContext(ctx context.Context, t *testing.T, closure func(db *sql.DB)) {
 	t.Helper()
 
@@ -181,7 +190,7 @@ func WithTestDatabaseEmptyContext(ctx context.Context, t *testing.T, closure fun
 		poolHash := storePoolHash(t, poolID, []string{selfFile})
 
 		// properly build up the template database once (noop)
-		execClosureNewIntegresTemplate(ctx, t, poolHash, func(db *sql.DB) error {
+		execClosureNewIntegresTemplate(ctx, t, poolHash, func(_ *sql.DB) error {
 			t.Helper()
 			return nil
 		})
@@ -281,9 +290,15 @@ func execClosureNewIntegresDatabase(ctx context.Context, t *testing.T, poolHash 
 	db = nil
 }
 
-// Applies all current database migrations to db
+// ApplyMigrations applies all current database migrations to db
 func ApplyMigrations(t *testing.T, db *sql.DB) (countMigrations int, err error) {
 	t.Helper()
+
+	// In case an old default sql-migrate migration table (named "gorp_migrations") still exists we rename it to the new name equivalent
+	// in sync with the settings in dbconfig.yml and config.DatabaseMigrationTable.
+	if _, err := db.Exec(fmt.Sprintf("ALTER TABLE IF EXISTS gorp_migrations RENAME TO %s;", config.DatabaseMigrationTable)); err != nil {
+		return 0, err
+	}
 
 	migrations := &migrate.FileMigrationSource{Dir: migDir}
 	countMigrations, err = migrate.Exec(db, "postgres", migrations, migrate.Up)
@@ -294,7 +309,7 @@ func ApplyMigrations(t *testing.T, db *sql.DB) (countMigrations int, err error) 
 	return countMigrations, err
 }
 
-// Applies all current test fixtures (insert) to db
+// ApplyTestFixtures applies all current test fixtures (insert) to db
 func ApplyTestFixtures(ctx context.Context, t *testing.T, db *sql.DB) (countFixtures int, err error) {
 	t.Helper()
 
@@ -318,7 +333,7 @@ func ApplyTestFixtures(ctx context.Context, t *testing.T, db *sql.DB) (countFixt
 	return len(inserts), nil
 }
 
-// Applies dumpFile (absolute path to .sql file) to db
+// ApplyDump applies dumpFile (absolute path to .sql file) to db
 func ApplyDump(ctx context.Context, t *testing.T, db *sql.DB, dumpFile string) error {
 	t.Helper()
 
@@ -327,13 +342,13 @@ func ApplyDump(ctx context.Context, t *testing.T, db *sql.DB, dumpFile string) e
 		return err
 	}
 
-	// we need to get the db name before beeing able to do anything.
+	// we need to get the db name before being able to do anything.
 	var targetDB string
-	if err := db.QueryRow("SELECT current_database();").Scan(&targetDB); err != nil {
+	if err := db.QueryRowContext(ctx, "SELECT current_database();").Scan(&targetDB); err != nil {
 		return err
 	}
 
-	cmd := exec.Command("bash", "-c", fmt.Sprintf("cat %q | psql %q", dumpFile, targetDB)) //nolint:gosec
+	cmd := exec.CommandContext(ctx, "bash", "-c", fmt.Sprintf("cat %q | psql %q", dumpFile, targetDB)) //nolint:gosec
 	combinedOutput, err := cmd.CombinedOutput()
 
 	if err != nil {

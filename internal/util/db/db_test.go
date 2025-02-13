@@ -7,7 +7,6 @@ import (
 
 	"allaboutapps.dev/aw/go-starter/internal/models"
 	"allaboutapps.dev/aw/go-starter/internal/test"
-	swaggerTypes "allaboutapps.dev/aw/go-starter/internal/types"
 	"allaboutapps.dev/aw/go-starter/internal/util/db"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
@@ -93,11 +92,8 @@ func TestWithTransactionWithError(t *testing.T) {
 				IsActive: true,
 				Username: null.StringFrom("test"),
 			}
-			if err := newUser2.Insert(ctx, tx, boil.Infer()); err != nil {
-				return err
-			}
 
-			return nil
+			return newUser2.Insert(ctx, tx, boil.Infer())
 		})
 		require.Error(t, err)
 
@@ -116,6 +112,7 @@ func TestWithTransactionWithPanic(t *testing.T) {
 		assert.Greater(t, count, int64(0))
 
 		panicFunc := func() {
+			//nolint:errcheck
 			_ = db.WithTransaction(ctx, sqlDB, func(tx boil.ContextExecutor) error {
 				newUser := models.User{
 					IsActive: true,
@@ -151,8 +148,8 @@ func TestWithTransactionWithPanic(t *testing.T) {
 }
 
 func TestDBTypeConversions(t *testing.T) {
-	i := int64(19)
-	res := db.NullIntFromInt64Ptr(&i)
+	i64 := int64(19)
+	res := db.NullIntFromInt64Ptr(&i64)
 	assert.Equal(t, 19, res.Int)
 	assert.True(t, res.Valid)
 
@@ -166,102 +163,29 @@ func TestDBTypeConversions(t *testing.T) {
 
 	res2 = db.NullFloat32FromFloat64Ptr(nil)
 	assert.False(t, res2.Valid)
-}
 
-func TestSearchStringToTSQuery(t *testing.T) {
-	expected := "abcde:* & 12345:* & xyz:*"
-	in := "    abcde 12345 xyz   "
-	out := db.SearchStringToTSQuery(in)
-	assert.Equal(t, expected, out)
+	i16 := int16(19)
+	res3 := db.NullIntFromInt16Ptr(&i16)
+	assert.Equal(t, 19, res3.Int)
+	assert.True(t, res3.Valid)
 
-	expected = "abcde:*"
-	in = "abcde"
-	out = db.SearchStringToTSQuery(in)
-	assert.Equal(t, expected, out)
-}
+	res4 := db.Int16PtrFromNullInt(res3)
+	require.NotEmpty(t, res4)
+	assert.Equal(t, i16, *res4)
 
-func TestInnterJoinWithFilter(t *testing.T) {
-	test.WithTestDatabase(t, func(sqlDB *sql.DB) {
-		ctx := context.Background()
-		fixtures := test.Fixtures()
+	res5 := db.Int16PtrFromNullInt(null.IntFromPtr(nil))
+	assert.Empty(t, res5)
 
-		profiles, err := models.AppUserProfiles(db.InnerJoinWithFilter(models.TableNames.AppUserProfiles,
-			models.AppUserProfileColumns.UserID,
-			models.TableNames.Users,
-			models.UserColumns.ID,
-			models.UserColumns.Username,
-			"user1@example.com",
-		)).All(ctx, sqlDB)
-		require.NoError(t, err)
-		require.Len(t, profiles, 1)
+	i := 7
+	res6 := db.Int16PtrFromInt(i)
+	require.NotEmpty(t, res6)
+	assert.Equal(t, i, int(*res6))
 
-		assert.Equal(t, fixtures.User1AppUserProfile.UserID, profiles[0].UserID)
-	})
-}
+	res7 := db.NullStringIfEmpty("")
+	assert.False(t, res7.Valid)
 
-func TestInnterJoin(t *testing.T) {
-	test.WithTestDatabase(t, func(sqlDB *sql.DB) {
-		ctx := context.Background()
-		fixtures := test.Fixtures()
-
-		profiles, err := models.AppUserProfiles(db.InnerJoin(models.TableNames.AppUserProfiles,
-			models.AppUserProfileColumns.UserID,
-			models.TableNames.Users,
-			models.UserColumns.ID,
-		),
-			models.UserWhere.Username.EQ(null.StringFrom("user1@example.com")),
-		).All(ctx, sqlDB)
-		require.NoError(t, err)
-		require.Len(t, profiles, 1)
-
-		assert.Equal(t, fixtures.User1AppUserProfile.UserID, profiles[0].UserID)
-	})
-}
-
-func TestOrderBy(t *testing.T) {
-	test.WithTestDatabase(t, func(sqlDB *sql.DB) {
-		ctx := context.Background()
-		fixtures := test.Fixtures()
-
-		noUsername := models.User{
-			Scopes: types.StringArray{"cms"},
-		}
-
-		upperUsername := models.User{
-			Username: null.StringFrom("USER3@example.com"),
-			Scopes:   types.StringArray{"cms"},
-		}
-
-		err := noUsername.Insert(ctx, sqlDB, boil.Infer())
-		require.NoError(t, err)
-
-		err = upperUsername.Insert(ctx, sqlDB, boil.Infer())
-		require.NoError(t, err)
-
-		users, err := models.Users(db.OrderBy(swaggerTypes.OrderDirAsc, models.TableNames.Users, models.UserColumns.Username)).All(ctx, sqlDB)
-		require.NoError(t, err)
-		require.NotEmpty(t, users)
-		assert.Equal(t, upperUsername.ID, users[0].ID)
-		assert.Equal(t, upperUsername.Username, users[0].Username)
-
-		users, err = models.Users(db.OrderByLower(swaggerTypes.OrderDirAsc, models.TableNames.Users, models.UserColumns.Username)).All(ctx, sqlDB)
-		require.NoError(t, err)
-		require.NotEmpty(t, users)
-		assert.Equal(t, fixtures.User1.ID, users[0].ID)
-		assert.Equal(t, fixtures.User1.Username, users[0].Username)
-
-		users, err = models.Users(db.OrderByWithNulls(swaggerTypes.OrderDirAsc, db.OrderByNullsFirst, models.TableNames.Users, models.UserColumns.Username)).All(ctx, sqlDB)
-		require.NoError(t, err)
-		require.NotEmpty(t, users)
-		assert.Equal(t, noUsername.ID, users[0].ID)
-		assert.Equal(t, noUsername.Username, users[0].Username)
-
-		users, err = models.Users(db.OrderByLowerWithNulls(swaggerTypes.OrderDirDesc, db.OrderByNullsLast, models.TableNames.Users, models.UserColumns.Username)).All(ctx, sqlDB)
-		require.NoError(t, err)
-		require.NotEmpty(t, users)
-		assert.Equal(t, fixtures.UserDeactivated.ID, users[0].ID)
-		assert.Equal(t, fixtures.UserDeactivated.Username, users[0].Username)
-		assert.Equal(t, upperUsername.ID, users[1].ID)
-		assert.Equal(t, upperUsername.Username, users[1].Username)
-	})
+	s := "foo"
+	res8 := db.NullStringIfEmpty(s)
+	assert.True(t, res8.Valid)
+	assert.Equal(t, s, res8.String)
 }

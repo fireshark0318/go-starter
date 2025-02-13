@@ -2,9 +2,11 @@ package test
 
 import (
 	"context"
+	"fmt"
 	"time"
 
 	"allaboutapps.dev/aw/go-starter/internal/models"
+	"allaboutapps.dev/aw/go-starter/internal/util"
 	"github.com/volatiletech/null/v8"
 	"github.com/volatiletech/sqlboiler/v4/boil"
 )
@@ -14,12 +16,13 @@ const (
 	HashedTestUserPassword = "$argon2id$v=19$m=65536,t=1,p=4$RFO8ulg2c2zloG0029pAUQ$2Po6NUIhVCMm9vivVDuzo7k5KVWfZzJJfeXzC+n+row" //nolint:gosec
 )
 
-// A common interface for all model instances so they may be inserted via the Inserts() func
+// Insertable represents a common interface for all model instances so they may be inserted via the Inserts() func
 type Insertable interface {
 	Insert(ctx context.Context, exec boil.ContextExecutor, columns boil.Columns) error
 }
 
-// The main definition which fixtures are available though Fixtures()
+// The main definition which fixtures are available through Fixtures().
+// Mind the declaration order! The fields get inserted exactly in the order they are declared.
 type FixtureMap struct {
 	User1                         *models.User
 	User1AppUserProfile           *models.AppUserProfile
@@ -37,8 +40,8 @@ type FixtureMap struct {
 	User1PushTokenAPN             *models.PushToken
 }
 
-// We return a function wrapping our fixtures, tests are allowed to manipulate those
-// each test (which may run concurrently) can use a fresh copy
+// Fixtures returns a function wrapping our fixtures, which tests are allowed to manipulate.
+// Each test (which may run concurrently) receives a fresh copy, preventing side effects between test runs.
 func Fixtures() FixtureMap {
 	now := time.Now()
 	f := FixtureMap{}
@@ -132,25 +135,15 @@ func Fixtures() FixtureMap {
 	return f
 }
 
-// This function defines the order in which the fixtures will be inserted
+// Inserts defines the order in which the fixtures will be inserted
 // into the test database
 func Inserts() []Insertable {
-	fixtures := Fixtures()
-
-	return []Insertable{
-		fixtures.User1,
-		fixtures.User1AppUserProfile,
-		fixtures.User1AccessToken1,
-		fixtures.User1RefreshToken1,
-		fixtures.User2,
-		fixtures.User2AppUserProfile,
-		fixtures.User2AccessToken1,
-		fixtures.User2RefreshToken1,
-		fixtures.UserDeactivated,
-		fixtures.UserDeactivatedAppUserProfile,
-		fixtures.UserDeactivatedAccessToken1,
-		fixtures.UserDeactivatedRefreshToken1,
-		fixtures.User1PushToken,
-		fixtures.User1PushTokenAPN,
+	fix := Fixtures()
+	insertableIfc := (*Insertable)(nil)
+	inserts, err := util.GetFieldsImplementing(&fix, insertableIfc)
+	if err != nil {
+		panic(fmt.Errorf("failed to get insertable fixture fields: %w", err))
 	}
+
+	return inserts
 }

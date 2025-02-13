@@ -1,3 +1,7 @@
+run:
+  # also lint files within /scripts. Those have "//go:build scripts" set.
+  build-tags:
+    - scripts
 linters:
   enable:
     # https://github.com/golangci/golangci-lint#enabled-by-default-linters
@@ -5,18 +9,16 @@ linters:
 
     # ---
     # https://github.com/mgechev/revive
-    # # replacement for the now deprecated official golint linter, see https://github.com/golang/go/issues/38968
-    - revive
-    
+
     # ---
     # https://github.com/maratori/testpackage
     # used to enforce blackbox testing
     - testpackage
-    
-    # ---
+
     # https://github.com/securego/gosec
     # inspects source code for security problems by scanning the Go AST.
     - gosec
+
 
 issues:
   exclude-rules:
@@ -54,3 +56,14 @@ linters-settings:
       - name: unexported-return
       - name: indent-error-flow
       - name: errorf
+=======
+    # ---
+    # https://github.com/sivchari/tenv
+    # prefer t.Setenv instead of os.Setenv within test code.
+    - tenv
+
+    # ---
+    # https://github.com/polyfloyd/go-errorlint
+    # ensure we are comparing errors via errors.Is, types/values via errors.As and wrap errors with %w.
+    - errorlint
+

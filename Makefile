@@ -13,6 +13,7 @@ build: ##- Default 'make' target: sql, swagger, go-generate, go-format, go-build
 all: clean init ##- Runs all of our common make targets: clean, init, build and test.
 	@$(MAKE) build
 	@$(MAKE) test
+	@$(MAKE) trivy
 
 info: info-db info-handlers info-go ##- Prints info about spec db, handlers, and go.mod updates, module-name and current go version.
 
@@ -23,7 +24,7 @@ info-db: ##- (opt) Prints info about spec db.
 
 info-handlers: ##- (opt) Prints info about handlers.
 	@echo "[handlers]" > tmp/.info-handlers
-	@go run -tags scripts scripts/handlers/check_handlers.go --print-all >> tmp/.info-handlers
+	@gsdev handlers check --print-all >> tmp/.info-handlers
 	@echo "" >> tmp/.info-handlers
 	@cat tmp/.info-handlers
 
@@ -34,7 +35,7 @@ info-go: ##- (opt) Prints go.mod updates, module-name and current go version.
 	@go version >> tmp/.info-go
 	@cat tmp/.info-go
 
-lint: check-gen-dirs check-handlers check-embedded-modules-go-not go-lint  ##- Runs golangci-lint and make check-*.
+lint: check-gen-dirs check-script-dir check-handlers check-embedded-modules-go-not go-lint  ##- Runs golangci-lint and make check-*.
 
 # these recipies may execute in parallel
 build-pre: sql swagger ##- (opt) Runs pre-build related targets (sql, swagger, go-generate).
@@ -47,13 +48,13 @@ go-build: ##- (opt) Runs go build.
 	go build -ldflags $(LDFLAGS) -o bin/app
 
 go-lint: ##- (opt) Runs golangci-lint.
-	golangci-lint run --fast --timeout 5m
+	golangci-lint run --timeout 5m
 
 go-generate: ##- (opt) Generates the internal/api/handlers/handlers.go binding.
-	go run -tags scripts scripts/handlers/gen_handlers.go
+	gsdev handlers gen
 
 check-handlers: ##- (opt) Checks if implemented handlers match their spec (path).
-	go run -tags scripts scripts/handlers/check_handlers.go
+	gsdev handlers check
 
 # https://golang.org/pkg/cmd/go/internal/generate/
 # To convey to humans and machine tools that code is generated,
@@ -62,8 +63,14 @@ check-handlers: ##- (opt) Checks if implemented handlers match their spec (path)
 #    ^// Code generated .* DO NOT EDIT\.$
 check-gen-dirs: ##- (opt) Ensures internal/models|types only hold generated files.
 	@echo "make check-gen-dirs"
-	@grep -R -L '^// Code generated .* DO NOT EDIT\.$$' --exclude ".DS_Store" ./internal/types/ && echo "Error: Non generated file(s) in ./internal/types!" && exit 1 || exit 0
-	@grep -R -L '^// Code generated .* DO NOT EDIT\.$$' --exclude ".DS_Store" ./internal/models/ && echo "Error: Non generated file(s) in ./internal/models!" && && exit 1 || exit 0
+	@find ./internal/types -name ".*" -prune -o -type f -print | xargs -L1 grep -L '// Code generated .* DO NOT EDIT\.' \
+		|| (echo "Error: Non generated file(s) in ./internal/types!" && exit 1)
+	@find ./internal/models -name ".*" -prune -o -type f -print | xargs -L1 grep -L '// Code generated .* DO NOT EDIT\.' \
+		|| (echo "Error: Non generated file(s) in ./internal/models!" && exit 1)
+
+check-script-dir: ##- (opt) Ensures all scripts/**/*.go files have the "//go:build scripts" build tag set.
+	@echo "make check-script-dir"
+	@find ./scripts -type f -name '*.go' | xargs -L1 grep -L '//go:build scripts' || (echo "Error: Found unset '//go:build scripts' in ./scripts/**/*.go!" && exit 1)
 
 # https://github.com/gotestyourself/gotestsum#format 
 # w/o cache https://github.com/golang/go/issues/24573 - see "go help testflag"
@@ -79,9 +86,14 @@ test-by-name: ##- Run tests, output by testname, print coverage.
 	@$(MAKE) go-test-by-name
 	@$(MAKE) go-test-print-coverage
 
+test-update-golden: ##- Refreshes all golden files / snapshot tests by running tests, output by package.
+	@echo "Attempting to refresh all golden files / snapshot tests (TEST_UPDATE_GOLDEN=true)!"
+	@echo -n "Are you sure? [y/N] " && read ans && [ $${ans:-N} = y ]
+	@TEST_UPDATE_GOLDEN=true gotestsum --hide-summary=skipped -- -race -count=1 ./...
+
 # note that we explicitly don't want to use a -coverpkg=./... option, per pkg coverage take precedence
 go-test-by-pkg: ##- (opt) Run tests, output by package.
-	gotestsum --format pkgname-and-test-fails --jsonfile /tmp/test.log -- -race -cover -count=1 -coverprofile=/tmp/coverage.out ./...
+	gotestsum --format pkgname-and-test-fails --format-hide-empty-pkg --jsonfile /tmp/test.log -- -race -cover -count=1 -coverprofile=/tmp/coverage.out ./...
 
 go-test-by-name: ##- (opt) Run tests, output by testname.
 	gotestsum --format testname --jsonfile /tmp/test.log -- -race -cover -count=1 -coverprofile=/tmp/coverage.out ./...
@@ -100,6 +112,14 @@ get-go-outdated-modules: ##- (opt) Prints outdated (direct) go modules (from go.
 watch-tests: ##- Watches *.go files and runs package tests on modifications.
 	gotestsum --format testname --watch -- -race -count=1
 
+test-scripts: ##- (opt) Run scripts tests (gsdev), output by package, print coverage.
+	@$(MAKE) go-test-scripts-by-pkg
+	@printf "coverage "
+	@go tool cover -func=/tmp/coverage-scripts.out | tail -n 1 | awk '{$$1=$$1;print}'
+
+go-test-scripts-by-pkg: ##- (opt) Run scripts tests (gsdev), output by package.
+	gotestsum --format pkgname-and-test-fails --jsonfile /tmp/test.log -- $$(go list -tags scripts ./... | grep "${GO_MODULE_NAME}/scripts") -tags scripts -race -cover -count=1 -coverprofile=/tmp/coverage-scripts.out ./...
+
 ### -----------------------
 # --- Initializing
 ### -----------------------
@@ -115,7 +135,7 @@ modules: ##- (opt) Cache packages as specified in go.mod.
 
 # https://marcofranssen.nl/manage-go-tools-via-go-modules/
 tools: ##- (opt) Install packages as specified in tools.go.
-	@cat tools.go | grep _ | awk -F'"' '{print $$2}' | xargs -P $$(nproc) -L 1 -tI % go install %
+	@cat tools.go | grep _ | awk -F'"' '{print $$2}' | xargs -P $$(nproc) -tI % go install %
 
 tidy: ##- (opt) Tidy our go.sum file.
 	go mod tidy
@@ -161,10 +181,10 @@ sql-boiler: ##- (opt) Runs sql-boiler introspects the spec db to generate intern
 
 sql-format: ##- (opt) Formats all *.sql files.
 	@echo "make sql-format"
-	@find ${PWD} -name ".*" -prune -o -type f -iname "*.sql" -print \
+	@find ${PWD} -path "*/tmp/*" -prune -name ".*" -prune -o -type f -iname "*.sql" -print \
 		| grep --invert "/app/dumps/" \
 		| grep --invert "/app/test/" \
-		| xargs -i pg_format {} -o {}
+		| xargs -i pg_format --inplace {}
 
 sql-check-files: sql-check-syntax sql-check-migrations-unnecessary-null ##- (opt) Check syntax and unnecessary use of NULL keyword.
 
@@ -172,7 +192,7 @@ sql-check-files: sql-check-syntax sql-check-migrations-unnecessary-null ##- (opt
 # https://stackoverflow.com/questions/8271606/postgresql-syntax-check-without-running-the-query
 sql-check-syntax: ##- (opt) Checks syntax of all *.sql files.
 	@echo "make sql-check-syntax"
-	@find ${PWD} -name ".*" -prune -path ./dumps -prune -false -o -type f -iname "*.sql" -print \
+	@find ${PWD} -path "*/tmp/*" -prune -name ".*" -prune -path ./dumps -prune -false -o -type f -iname "*.sql" -print \
 		| grep --invert "/app/dumps/" \
 		| grep --invert "/app/test/" \
 		| xargs -i sed '1s#^#DO $$SYNTAX_CHECK$$ BEGIN RETURN;#; $$aEND; $$SYNTAX_CHECK$$;' {} \
@@ -220,12 +240,32 @@ swagger: ##- Runs make swagger-concat and swagger-server.
 	@$(MAKE) swagger-concat
 	@$(MAKE) swagger-server
 
+# Any sibling elements of a $ref are ignored. This is because $ref works by replacing itself and everything on its level with the definition it is pointing at.
+# https://swagger.io/docs/specification/using-ref/
+swagger-lint-ref-siblings: ##- (opt) Checks api/**/*.[yml|yaml] for invalid usage of $ref (no siblings).
+	@echo "make swagger-lint-ref-siblings"
+	@rm -f /tmp/swagger-lint-ref-siblings-errors.log && touch /tmp/swagger-lint-ref-siblings-errors.log
+	@find api -type f -name "*.yml" -o -name "*.yaml" \
+		| { \
+			while read ymlfile; \
+			do \
+				ref_siblings=$$(yq e '.. | select(has("$$ref") and length != 1)' $$ymlfile); \
+				([[ -z "$$ref_siblings" ]] \
+					|| (echo "Error: Found invalid \$$ref siblings within $$ymlfile:" \
+						&& (yq -P e '[.. | select(has("$$ref") and length != 1)]' $$ymlfile) \
+						&& (echo $$ymlfile >> /tmp/swagger-lint-ref-siblings-errors.log))); \
+			done \
+		};
+	@[[ "$$(cat /tmp/swagger-lint-ref-siblings-errors.log | wc -l)" -eq "0" ]] \
+		|| (echo "Error: $$(cat /tmp/swagger-lint-ref-siblings-errors.log | wc -l) files have \$$ref(s) with siblings!" \
+			&& false)
+
 # https://goswagger.io/usage/mixin.html
 # https://goswagger.io/usage/flatten.html
 swagger-concat: ##- (opt) Regenerates api/swagger.yml based on api/paths/*.
 	@echo "make swagger-concat"
-	@rm -rf api/tmp
 	@mkdir -p api/tmp
+	@rm -rf api/tmp/*
 	@swagger mixin \
 		--output=api/tmp/tmp.yml \
 		--format=yaml \
@@ -238,27 +278,35 @@ swagger-concat: ##- (opt) Regenerates api/swagger.yml based on api/paths/*.
 		-q
 	@sed -i '1s@^@# // Code generated by "make swagger"; DO NOT EDIT.\n@' api/swagger.yml
 
+swagger-server: swagger-generate swagger-lint-ref-siblings swagger-validate ##- (opt) Lint/validate api/swagger.yml and generate /internal/types.
+
 # https://goswagger.io/generate/server.html
 # Note that we first flag all files to delete (as previously generated), regenerate, then delete all still flagged files
 # This allows us to ensure that any filewatchers (VScode) don't panic as these files are removed.
 # --keep-spec-order is broken (/tmp spec resolving): https://github.com/go-swagger/go-swagger/issues/2216
-swagger-server: ##- (opt) Regenerates internal/types based on api/swagger.yml.
-	@echo "make swagger-server"
-	@grep -R -L '^// Code generated .* DO NOT EDIT\.$$$$' ./internal/types \
-		| xargs sed -i '1s#^#// DELETE ME; DO NOT EDIT.\n#'
+swagger-generate: ##- (opt) Generate swagger /internal/types.
+	@echo "make swagger-generate"
+	@rm -rf tmp/testdata/types
+	@mkdir -p tmp/testdata/types
 	@swagger generate server \
 		--allow-template-override \
 		--template-dir=api/templates \
 		--spec=api/swagger.yml \
-		--server-package=internal/types \
-		--model-package=internal/types \
+		--server-package=tmp/testdata/types \
+		--model-package=tmp/testdata/types \
 		--exclude-main \
+		--skip-validation \
 		--config-file=api/config/go-swagger-config.yml \
 		-q
-	@find internal/types -type f -exec grep -q '^// DELETE ME; DO NOT EDIT\.$$' {} \; -delete
+	@find tmp/testdata/types -type f -exec sed -i "s|${GO_MODULE_NAME}/tmp/testdata/types|${GO_MODULE_NAME}/internal/types|g" {} \;
+	rsync -au --ignore-times --delete tmp/testdata/types/ internal/types/
+
+swagger-validate: ##- (opt) Validate api/swagger.yml.
+	@echo "make swagger-validate"
+	@swagger validate --skip-warnings --stop-on-error -q api/swagger.yml
 
 watch-swagger: ##- Watches *.yml|yaml|gotmpl files in /api and runs 'make swagger' on modifications.
-	@echo "Watching /api/**/*.yml|yaml|gotmpl. Use Ctrl-c to to stop a run or exit."
+	@echo "Watching /api/**/*.yml|yaml|gotmpl. Use Ctrl-c to stop a run or exit."
 	watchexec -p -w api -i tmp -i api/swagger.yml --exts yml,yaml,gotmpl $(MAKE) swagger
 
 ### -----------------------
@@ -281,29 +329,50 @@ check-embedded-modules-go-not: ##- (opt) Checks embedded modules in compiled bin
 	@(mkdir -p tmp 2> /dev/null && go version -m -v bin/app > tmp/.modules)
 	grep -f go.not -F tmp/.modules && (echo "go.not: Found disallowed embedded module(s) in bin/app!" && exit 1) || exit 0
 
+trivy-report: ##- Prints trivy report for all severities without failing
+	@echo "make trivy-report"
+	@trivy fs /app --exit-code 0 --quiet
+
+trivy: ##- Runs trivy analysis and fails on HIGH, CRITICAL vulnerabilities.
+	@echo "make trivy"
+	@trivy fs /app --exit-code 1 --severity HIGH,CRITICAL --quiet
+
+govulncheck:
+	@echo "make govulncheck"
+	@govulncheck /app/...
+
 ### -----------------------
 # --- Git related
 ### -----------------------
 
-git-fetch-go-starter: ##- (opt) Fetches upstream go-starter master (creating git remote 'go-starter').
-	@git config remote.go-starter.url >&- || git remote add go-starter https://github.com/allaboutapps/go-starter.git
-	@git fetch go-starter master
+# This is the default upstream go-starter branch we will use for our comparisons.
+# You may use a different tag/branch/commit like this:
+# - Merge with a specific tag, e.g. `go-starter-2021-10-19`: `GIT_GO_STARTER_TARGET=go-starter-2021-10-19 make git-merge-go-starter`
+# - Merge with a specific branch, e.g. `mr/housekeeping`: `GIT_GO_STARTER_TARGET=go-starter/mr/housekeeping make git-merge-go-starter` (heads up! it's `go-starter/<branchname>`)
+# - Merge with a specific commit, e.g. `e85bedb9`: `GIT_GO_STARTER_TARGET=e85bedb94c3562602bc23d2bfd09fca3b13d1e02 make git-merge-go-starter`
+GIT_GO_STARTER_TARGET ?= go-starter/master
+GIT_GO_STARTER_BASE ?= $(GIT_GO_STARTER_TARGET:go-starter/%=%)
 
-git-compare-go-starter: ##- (opt) Compare upstream go-starter master to HEAD displaying commits away and git log.
+git-fetch-go-starter: ##- (opt) Fetches upstream GIT_GO_STARTER_TARGET (creating git remote 'go-starter').
+	@echo "GIT_GO_STARTER_TARGET=${GIT_GO_STARTER_TARGET} GIT_GO_STARTER_BASE=${GIT_GO_STARTER_BASE}"
+	@git config remote.go-starter.url >&- || git remote add go-starter https://github.com/allaboutapps/go-starter.git
+	@git fetch go-starter ${GIT_GO_STARTER_BASE}
+
+git-compare-go-starter: ##- (opt) Compare upstream GIT_GO_STARTER_TARGET to HEAD displaying commits away and git log.
 	@$(MAKE) git-fetch-go-starter
-	@echo "Commits away from upstream go-starter master:"
-	git --no-pager rev-list --pretty=oneline --left-only --count go-starter/master...HEAD
+	@echo "Commits away from upstream go-starter ${GIT_GO_STARTER_TARGET}:"
+	git --no-pager rev-list --pretty=oneline --left-only --count ${GIT_GO_STARTER_TARGET}...HEAD
 	@echo ""
 	@echo "Git log:"
-	git --no-pager log --left-only --pretty="%C(Yellow)%h  %C(reset)%ad (%C(Green)%cr%C(reset))%x09 %C(Cyan)%an: %C(reset)%s" --abbrev-commit --count go-starter/master...HEAD
+	git --no-pager log --left-only --pretty="%C(Yellow)%h  %C(reset)%ad (%C(Green)%cr%C(reset))%x09 %C(Cyan)%an: %C(reset)%s" --abbrev-commit --count ${GIT_GO_STARTER_TARGET}...HEAD
 
-git-merge-go-starter: ##- Merges upstream go-starter master into current HEAD.
+git-merge-go-starter: ##- Merges upstream GIT_GO_STARTER_TARGET into current HEAD.
 	@$(MAKE) git-compare-go-starter
 	@(echo "" \
-		&& echo "Attempting to execute 'git merge --no-commit --no-ff --allow-unrelated-histories go-starter/master' into your current HEAD." \
+		&& echo "Attempting to execute 'git merge --no-commit --no-ff --allow-unrelated-histories ${GIT_GO_STARTER_TARGET}' into your current HEAD." \
 		&& echo -n "Are you sure? [y/N]" \
 		&& read ans && [ $${ans:-N} = y ]) || exit 1
-	git merge --no-commit --no-ff --allow-unrelated-histories go-starter/master || true
+	git merge --no-commit --no-ff --allow-unrelated-histories ${GIT_GO_STARTER_TARGET} || true
 	@echo "Done. We recommend to run 'make force-module-name' to automatically fix all import paths."
 
 ### -----------------------
@@ -312,8 +381,8 @@ git-merge-go-starter: ##- Merges upstream go-starter master into current HEAD.
 
 clean: ##- Cleans ./tmp and ./api/tmp folder.
 	@echo "make clean"
-	@rm -rf tmp 2> /dev/null
-	@rm -rf api/tmp 2> /dev/null
+	@rm -rf tmp/* 2> /dev/null
+	@rm -rf api/tmp/* 2> /dev/null
 
 get-module-name: ##- Prints current go module-name (pipeable).
 	@echo "${GO_MODULE_NAME}"
@@ -354,6 +423,23 @@ help-all: ##- Show all make targets.
 	@sed -e '/#\{2\}-/!d; s/\\$$//; s/:[^#\t]*/@/; s/#\{2\}- *//' $(MAKEFILE_LIST) | sort | column -t -s '@'
 
 ### -----------------------
+# --- Changelog
+### -----------------------
+
+changelog-prerelease: # Usage: make changelog-prerelease
+	@echo "make changelog-prerelease"
+	@changie batch 0.0.0 --prerelease prerelease-$(shell date +%Y-%m-%d-%H%M%S) --move-dir prerelease
+	@git add --all
+	@git commit -m "PRERELEASE: $(shell date +%Y-%m-%d-%H%M%S)"
+
+changelog-release: # Usage: make changelog-release VERSION=24.11.0
+	@echo "make changelog-release with version $(VERSION)"
+	@changie batch $(VERSION) --include prerelease --remove-prereleases
+	@changie merge
+	@git add --all
+	@git commit -m "RELEASE: $(VERSION)"
+
+### -----------------------
 # --- Make variables
 ### -----------------------
 
@@ -363,7 +449,7 @@ help-all: ##- Show all make targets.
 # go module name (as in go.mod)
 GO_MODULE_NAME = $(eval GO_MODULE_NAME := $$(shell \
 	(mkdir -p tmp 2> /dev/null && cat tmp/.modulename 2> /dev/null) \
-	|| (go run -tags scripts scripts/modulename/modulename.go 2> /dev/null | tee tmp/.modulename) || echo "unknown" \
+	|| (gsdev modulename 2> /dev/null | tee tmp/.modulename) || echo "unknown" \
 ))$(GO_MODULE_NAME)
 
 # https://medium.com/the-go-journey/adding-version-information-to-go-binaries-e1b79878f6f2
@@ -394,7 +480,13 @@ LDFLAGS = $(eval LDFLAGS := "\
 
 # https://unix.stackexchange.com/questions/153763/dont-stop-makeing-if-a-command-fails-but-check-exit-status
 # https://www.gnu.org/software/make/manual/html_node/One-Shell.html
-# required to ensure make fails if one recipe fails (even on parallel jobs)
+# required to ensure make fails if one recipe fails (even on parallel jobs) and on pipefails
 .ONESHELL:
-SHELL = /bin/bash
-.SHELLFLAGS = -ec
+
+# # normal POSIX bash shell mode
+# SHELL = /bin/bash
+# .SHELLFLAGS = -cEeuo pipefail
+
+# wrapped make time tracing shell, use it via MAKE_TRACE_TIME=true make <target>
+SHELL = /app/rksh
+.SHELLFLAGS = $@

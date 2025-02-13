@@ -9,9 +9,13 @@ import (
 type SMTPAuthType int
 
 const (
+	// SMTPAuthTypeNone indicates no SMTP authentication should be performed.
 	SMTPAuthTypeNone SMTPAuthType = iota
+	// SMTPAuthTypePlain indicates SMTP authentication should be performed using the "AUTH PLAIN" protocol.
 	SMTPAuthTypePlain
+	// SMTPAuthTypeCRAMMD5 indicates SMTP authentication should be performed using the "CRAM-MD5" protocol.
 	SMTPAuthTypeCRAMMD5
+	// SMTPAuthTypeLogin indicates SMTP authentication should be performed using the "LOGIN" protocol.
 	SMTPAuthTypeLogin
 )
 
@@ -43,12 +47,36 @@ func SMTPAuthTypeFromString(s string) SMTPAuthType {
 	}
 }
 
+type SMTPEncryption string
+
+const (
+	SMTPEncryptionNone     SMTPEncryption = "none"
+	SMTPEncryptionTLS      SMTPEncryption = "tls"
+	SMTPEncryptionStartTLS SMTPEncryption = "starttls"
+)
+
+func (e SMTPEncryption) String() string {
+	return string(e)
+}
+
+func SMTPEncryptionFromString(s string) SMTPEncryption {
+	switch strings.ToLower(s) {
+	case "tls":
+		return SMTPEncryptionTLS
+	case "starttls":
+		return SMTPEncryptionStartTLS
+	default:
+		return SMTPEncryptionNone
+	}
+}
+
 type SMTPMailTransportConfig struct {
-	Host      string
-	Port      int
-	AuthType  SMTPAuthType `json:"-"` // iota
-	Username  string
-	Password  string `json:"-"` // sensitive
-	UseTLS    bool
-	TLSConfig *tls.Config `json:"-"` // pointer
+	Host       string
+	Port       int
+	AuthType   SMTPAuthType `json:"-"` // iota
+	Username   string
+	Password   string         `json:"-"` // sensitive
+	Encryption SMTPEncryption `json:"-"` // iota
+	TLSConfig  *tls.Config    `json:"-"` // pointer
+	UseTLS     bool           // ! deprecated since 2021-10-25, use Encryption type 'SMTPEncryptionTLS' instead
 }

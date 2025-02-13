@@ -2,9 +2,17 @@
 
 **go-starter** is an opinionated *production-ready* RESTful JSON backend template written in [Go](https://golang.org/), highly integrated with [VSCode DevContainers](https://code.visualstudio.com/docs/remote/containers) by [allaboutapps](https://allaboutapps.at/).
 
+[![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](https://github.com/allaboutapps/go-starter/blob/master/LICENSE)
+[![Build and Test](https://github.com/allaboutapps/go-starter/actions/workflows/build-test.yml/badge.svg)](https://github.com/allaboutapps/go-starter/actions)
+[![codecov](https://codecov.io/gh/allaboutapps/go-starter/branch/master/graph/badge.svg?token=220E44857K)](https://codecov.io/gh/allaboutapps/go-starter)
+[![Go Report Card](https://goreportcard.com/badge/github.com/allaboutapps/go-starter)](https://goreportcard.com/report/github.com/allaboutapps/go-starter)
+[![Swagger Validator](https://img.shields.io/swagger/valid/3.0?specUrl=https%3A%2F%2Fraw.githubusercontent.com%2Fallaboutapps%2Fgo-starter%2Fmaster%2Fapi%2Fswagger.yml)](https://go-starter.allaboutapps.at/documentation/)
+![GitHub contributors](https://img.shields.io/github/contributors/allaboutapps/go-starter)
+[![Mentioned in Awesome Go](https://awesome.re/mentioned-badge.svg)](https://github.com/avelino/awesome-go)
+
 ![go starter overview](https://public.allaboutapps.at/go-starter-wiki/go-starter-main-overview.png)
 
-Demo: **[https://go-starter.allaboutapps.at](https://go-starter.allaboutapps.at)**  
+Demo: **[https://go-starter.allaboutapps.at](https://go-starter.allaboutapps.at)**
 FAQ: **[https://github.com/allaboutapps/go-starter/wiki/FAQ](https://github.com/allaboutapps/go-starter/wiki/FAQ)**
 
 ## Table of Contents
@@ -24,7 +32,8 @@ FAQ: **[https://github.com/allaboutapps/go-starter/wiki/FAQ](https://github.com/
     - [Uninstall](#uninstall)
   - [Additional resources](#additional-resources)
   - [Contributing](#contributing)
-  - [Maintainers](#maintainers)
+  - [Current maintainers](#current-maintainers)
+    - [Previous maintainers](#previous-maintainers)
   - [License](#license)
 
 ## Features
@@ -41,12 +50,12 @@ FAQ: **[https://github.com/allaboutapps/go-starter/wiki/FAQ](https://github.com/
 - Comes with fully implemented `auth` package, an OAuth2 RESTful JSON API ready to be extended according to your requirements.
 - Implements [OAuth 2.0 Bearer Tokens](https://tools.ietf.org/html/rfc6750) and password authentication using [argon2id](https://godoc.org/github.com/alexedwards/argon2id) hashes.
 - Comes with a tested mock and [FCM](https://firebase.google.com/docs/cloud-messaging) provider for sending push notifications and storing push tokens.
-- CLI layer provided by [spf13/cobra](https://github.com/spf13/cobra). It's exceptionally easy to add additional sub-commands.
-- Comes with an initial [PostgreSQL](https://www.postgresql.org/) database structure (see [/migrations](https://github.com/allaboutapps/go-starter/tree/master/migrations)), covering: 
+- CLI layer provided by [spf13/cobra](https://github.com/spf13/cobra). It's exceptionally easy to [add additional sub-commands via `cobra-cli`](https://github.com/spf13/cobra-cli/blob/main/README.md#add-commands-to-a-project).
+- Comes with an initial [PostgreSQL](https://www.postgresql.org/) database structure (see [/migrations](https://github.com/allaboutapps/go-starter/tree/master/migrations)), covering:
   - auth tokens (access-, refresh-, password-reset-tokens),
   - a generic auth-related `user` model
   - an app-specific bare-bones `app_user_profile` model,
-  - push notification tokens and 
+  - push notification tokens and
   - a health check sequence (for performing writeable checks).
 - API endpoints and CLI for liveness (`/-/healthy`) and readiness (`/-/ready`) probes
 - Parallel jobs optimized `Makefile` and various convenience scripts (see all targets and its description via `make help`). A full rebuild only takes seconds.
@@ -76,7 +85,7 @@ Please refer to the [official installation guide](https://code.visualstudio.com/
 
 ### Quickstart
 
-Create a new git repository through the GitHub template repository feature ([use this template](https://github.com/allaboutapps/go-starter/generate)). You will then start with a **single initial commit** in your own repository. 
+Create a new git repository through the GitHub template repository feature ([use this template](https://github.com/allaboutapps/go-starter/generate)). You will then start with a **single initial commit** in your own repository.
 
 ```bash
 # Clone your new repository, cd into it, then easily start the docker-compose dev environment through our helper
@@ -169,7 +178,7 @@ make
 make test
 ```
 
-### Running 
+### Running
 
 To run the service locally you may:
 
@@ -212,13 +221,18 @@ Pull requests are welcome. For major changes, please [open an issue](https://git
 
 Please make sure to update tests as appropriate.
 
-## Maintainers
+## Current maintainers
 
+- [Anna - @anjankow](https://github.com/anjankow)
 - [Michael Farkas - @farkmi](https://github.com/farkmi)
-- [Nick Müller - @MorpheusXAUT](https://github.com/MorpheusXAUT)
 - [Mario Ranftl - @majodev](https://github.com/majodev)
 - [Manuel Wieser - @mwieser](https://github.com/mwieser)
 
+### Previous maintainers
+
+- [Dominic Aschauer - @eldelto](https://github.com/eldelto)
+- [Nick Müller - @MorpheusXAUT](https://github.com/MorpheusXAUT)
+
 ## License
 
-[MIT](LICENSE) © 2021 aaa – all about apps GmbH | Michael Farkas | Nick Müller | Mario Ranftl | Manuel Wieser and the "go-starter" project contributors
+[MIT](LICENSE)

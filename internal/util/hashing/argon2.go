@@ -5,6 +5,7 @@ import (
 	"encoding/base64"
 	"errors"
 	"fmt"
+	"math"
 	"strings"
 
 	"golang.org/x/crypto/argon2"
@@ -13,11 +14,14 @@ import (
 // Inspired by: https://github.com/alexedwards/argon2id @ 2020-04-22T14:13:23ZZ
 
 const (
+	// Argon2HashID represents the hash ID set in the (pseudo) modular crypt format used to store the hashed password and params in a single string.
 	Argon2HashID = "argon2id"
 )
 
 var (
-	ErrInvalidArgon2Hash         = errors.New("invalid argon2id hash")
+	// ErrInvalidArgon2Hash indicates the argon2id hash was malformed and could not be decoded.
+	ErrInvalidArgon2Hash = errors.New("invalid argon2id hash")
+	// ErrIncompatibleArgon2Version indicates the argon2id hash provided was generated with a different, incompatible argon2 version.
 	ErrIncompatibleArgon2Version = errors.New("incompatible argon2 version")
 )
 
@@ -43,7 +47,14 @@ func ComparePasswordAndHash(password string, hash string) (matches bool, err err
 
 	pKey := argon2.IDKey([]byte(password), salt, params.Time, params.Memory, params.Threads, params.KeyLength)
 
-	if subtle.ConstantTimeEq(int32(len(key)), int32(len(pKey))) == 0 {
+	keyLen := len(key)
+	pKeyLen := len(pKey)
+
+	if keyLen > math.MaxInt32 || pKeyLen > math.MaxInt32 {
+		return false, ErrInvalidArgon2Hash
+	}
+
+	if subtle.ConstantTimeEq(int32(keyLen), int32(pKeyLen)) == 0 {
 		return false, nil
 	}
 
@@ -87,7 +98,13 @@ func decodeArgon2Hash(hash string) (params *Argon2Params, salt []byte, key []byt
 	if err != nil {
 		return nil, nil, nil, ErrInvalidArgon2Hash
 	}
-	params.KeyLength = uint32(len(key))
+
+	keyLength := len(key)
+	if keyLength > math.MaxInt32 {
+		return nil, nil, nil, ErrInvalidArgon2Hash
+	}
+
+	params.KeyLength = uint32(keyLength)
 
 	return params, salt, key, nil
 }
