@@ -573,6 +573,11 @@ response := test.RequireHTTPError(t, res, httperrors.ErrNotFoundTokenNotFound)
 - Moved `/api/main.yml` to `/api/config/main.yml` to overcome path resolve issues (`../definitions`) with the VSCode [42crunch.vscode-openapi](https://github.com/42Crunch/vscode-openapi) extension (auto-included in our devContainer) and our go-swagger concat behaviour.
 - Updated [api/README.md](https://github.com/allaboutapps/go-starter/blob/master/api/README.md) information about `/api/swagger.yml` generation logic and changed `make swagger-concat` accordingly
 
+## 2021-04-07
+### Changed
+-  Moved `/api/main.yml` to `/api/config/main.yml` to overcome path resolve issues (`../definitions`) with the VSCode [42crunch.vscode-openapi](https://github.com/42Crunch/vscode-openapi) extension (auto-included in our devContainer) and our go-swagger concat behaviour. 
+- Updated [api/README.md](https://github.com/allaboutapps/go-starter/blob/master/api/README.md) information about `/api/swagger.yml` generation logic and changed `make swagger-concat` accordingly
+
 ## 2021-04-02
 
 ### Changed
