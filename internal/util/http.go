@@ -3,20 +3,24 @@ package util
 import (
 	"bytes"
 	"context"
+	"errors"
 	"fmt"
 	"io"
-	"io/ioutil"
 	"mime/multipart"
 	"net/http"
 
 	"allaboutapps.dev/aw/go-starter/internal/api/httperrors"
 	"allaboutapps.dev/aw/go-starter/internal/types"
 	"github.com/gabriel-vasile/mimetype"
-	"github.com/go-openapi/errors"
+	oerrors "github.com/go-openapi/errors"
 	"github.com/go-openapi/runtime"
 	"github.com/go-openapi/strfmt"
 	"github.com/go-openapi/swag"
 	"github.com/labstack/echo/v4"
+)
+
+const (
+	HTTPHeaderCacheControl = "Cache-Control"
 )
 
 // BindAndValidateBody binds the request, parsing **only** its body (depending on the `Content-Type` request header) and performs validation
@@ -85,10 +89,11 @@ func BindAndValidateQueryParams(c echo.Context, v runtime.Validatable) error {
 // BindAndValidate binds the request, parsing path+query+body and validating these structs.
 //
 // Deprecated: Use our dedicated BindAndValidate* mappers instead:
-//   BindAndValidateBody(c echo.Context, v runtime.Validatable) error // preferred
-//   BindAndValidatePathAndQueryParams(c echo.Context, v runtime.Validatable) error  // preferred
-//   BindAndValidatePathParams(c echo.Context, v runtime.Validatable) error // rare usecases
-//   BindAndValidateQueryParams(c echo.Context, v runtime.Validatable) error // rare usecases
+//
+//	BindAndValidateBody(c echo.Context, v runtime.Validatable) error // preferred
+//	BindAndValidatePathAndQueryParams(c echo.Context, v runtime.Validatable) error  // preferred
+//	BindAndValidatePathParams(c echo.Context, v runtime.Validatable) error // rare usecases
+//	BindAndValidateQueryParams(c echo.Context, v runtime.Validatable) error // rare usecases
 //
 // BindAndValidate works like Echo <v4.2.0. It was preferred to .Bind() everything (query, params, body) to a single struct
 // in one pass. Thus we included additional handling to allow multiple body rebindings (though copying while restoring),
@@ -115,10 +120,10 @@ func BindAndValidate(c echo.Context, v runtime.Validatable, vs ...runtime.Valida
 		return validatePayload(c, v)
 	}
 
-	var reqBody []byte = nil
+	var reqBody []byte
 	var err error
 	if c.Request().Body != nil {
-		reqBody, err = ioutil.ReadAll(c.Request().Body)
+		reqBody, err = io.ReadAll(c.Request().Body)
 		if err != nil {
 			return err
 		}
@@ -212,7 +217,7 @@ func ParseFileUpload(c echo.Context, formNameFile string, allowedMIMETypes []str
 
 func restoreBindAndValidate(c echo.Context, reqBody []byte, v runtime.Validatable) error {
 	if reqBody != nil {
-		c.Request().Body = ioutil.NopCloser(bytes.NewBuffer(reqBody))
+		c.Request().Body = io.NopCloser(bytes.NewBuffer(reqBody))
 	}
 
 	if err := defaultEchoBindAll(c, v); err != nil {
@@ -224,29 +229,33 @@ func restoreBindAndValidate(c echo.Context, reqBody []byte, v runtime.Validatabl
 
 func validatePayload(c echo.Context, v runtime.Validatable) error {
 	if err := v.Validate(strfmt.Default); err != nil {
-		switch ee := err.(type) {
-		case *errors.CompositeError:
-			LogFromEchoContext(c).Debug().Errs("validation_errors", ee.Errors).Msg("Payload did match schema, returning HTTP validation error")
 
-			valErrs := formatValidationErrors(c.Request().Context(), ee)
+		var compositeError *oerrors.CompositeError
+		if errors.As(err, &compositeError) {
+			LogFromEchoContext(c).Debug().Errs("validation_errors", compositeError.Errors).Msg("Payload did match schema, returning HTTP validation error")
+
+			valErrs := formatValidationErrors(c.Request().Context(), compositeError)
 
 			return httperrors.NewHTTPValidationError(http.StatusBadRequest, httperrors.HTTPErrorTypeGeneric, http.StatusText(http.StatusBadRequest), valErrs)
-		case *errors.Validation:
-			LogFromEchoContext(c).Debug().AnErr("validation_error", ee).Msg("Payload did match schema, returning HTTP validation error")
+		}
+
+		var validationError *oerrors.Validation
+		if errors.As(err, &validationError) {
+			LogFromEchoContext(c).Debug().AnErr("validation_error", validationError).Msg("Payload did match schema, returning HTTP validation error")
 
 			valErrs := []*types.HTTPValidationErrorDetail{
 				{
-					Key:   &ee.Name,
-					In:    &ee.In,
-					Error: swag.String(ee.Error()),
+					Key:   &validationError.Name,
+					In:    &validationError.In,
+					Error: swag.String(validationError.Error()),
 				},
 			}
 
 			return httperrors.NewHTTPValidationError(http.StatusBadRequest, httperrors.HTTPErrorTypeGeneric, http.StatusText(http.StatusBadRequest), valErrs)
-		default:
-			LogFromEchoContext(c).Error().Err(err).Msg("Failed to validate payload, returning generic HTTP error")
-			return err
 		}
+
+		LogFromEchoContext(c).Error().Err(err).Msg("Failed to validate payload, returning generic HTTP error")
+		return err
 	}
 
 	return nil
@@ -277,21 +286,26 @@ func defaultEchoBindAll(c echo.Context, v runtime.Validatable) (err error) {
 	return binder.BindBody(c, v)
 }
 
-func formatValidationErrors(ctx context.Context, err *errors.CompositeError) []*types.HTTPValidationErrorDetail {
+func formatValidationErrors(ctx context.Context, err *oerrors.CompositeError) []*types.HTTPValidationErrorDetail {
 	valErrs := make([]*types.HTTPValidationErrorDetail, 0, len(err.Errors))
 	for _, e := range err.Errors {
-		switch ee := e.(type) {
-		case *errors.Validation:
-			valErrs = append(valErrs, &types.HTTPValidationErrorDetail{
-				Key:   &ee.Name,
-				In:    &ee.In,
-				Error: swag.String(ee.Error()),
-			})
-		case *errors.CompositeError:
-			valErrs = append(valErrs, formatValidationErrors(ctx, ee)...)
-		default:
-			LogFromContext(ctx).Warn().Err(e).Str("err_type", fmt.Sprintf("%T", e)).Msg("Received unknown error type while validating payload, skipping")
+		var compositeError *oerrors.CompositeError
+		if errors.As(e, &compositeError) {
+			valErrs = append(valErrs, formatValidationErrors(ctx, compositeError)...)
+			continue
 		}
+
+		var validationError *oerrors.Validation
+		if errors.As(e, &validationError) {
+			valErrs = append(valErrs, &types.HTTPValidationErrorDetail{
+				Key:   &validationError.Name,
+				In:    &validationError.In,
+				Error: swag.String(validationError.Error()),
+			})
+			continue
+		}
+
+		LogFromContext(ctx).Warn().Err(e).Str("err_type", fmt.Sprintf("%T", e)).Msg("Received unknown error type while validating payload, skipping")
 	}
 
 	return valErrs

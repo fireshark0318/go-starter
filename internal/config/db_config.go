@@ -2,10 +2,22 @@ package config
 
 import (
 	"fmt"
+	"path/filepath"
 	"sort"
 	"strings"
 	"time"
+
+	"allaboutapps.dev/aw/go-starter/internal/util"
 )
+
+// The DatabaseMigrationTable name is baked into the binary
+// This setting should always be in sync with dbconfig.yml, sqlboiler.toml and the live database (e.g. to be able to test producation dumps locally)
+const DatabaseMigrationTable = "migrations"
+
+// The DatabaseMigrationFolder (folder with all *.sql migrations).
+// This settings should always be in sync with dbconfig.yaml and Dockerfile (the final app stage).
+// It's expected that the migrations folder lives at the root of this project or right next to the app binary.
+var DatabaseMigrationFolder = filepath.Join(util.GetProjectRootDir(), "/migrations")
 
 type Database struct {
 	Host             string
@@ -19,7 +31,7 @@ type Database struct {
 	ConnMaxLifetime  time.Duration
 }
 
-// Generates a connection string to be passed to sql.Open or equivalents, assuming Postgres syntax
+// ConnectionString generates a connection string to be passed to sql.Open or equivalents, assuming Postgres syntax
 func (c Database) ConnectionString() string {
 	var b strings.Builder
 	b.WriteString(fmt.Sprintf("host=%s port=%d user=%s password=%s dbname=%s", c.Host, c.Port, c.Username, c.Password, c.Database))

@@ -8,6 +8,7 @@ import (
 	"sync"
 
 	"github.com/rs/zerolog/log"
+	"golang.org/x/text/language"
 )
 
 const (
@@ -15,8 +16,6 @@ const (
 )
 
 var (
-	projectRootDir string
-	dirOnce        sync.Once
 	mgmtSecret     string
 	mgmtSecretOnce sync.Once
 )
@@ -87,6 +86,7 @@ func GetEnvAsBool(key string, defaultVal bool) bool {
 	return defaultVal
 }
 
+// GetEnvAsStringArr reads ENV and returns the values split by separator.
 func GetEnvAsStringArr(key string, defaultVal []string, separator ...string) []string {
 	strVal := GetEnv(key, "")
 
@@ -100,6 +100,17 @@ func GetEnvAsStringArr(key string, defaultVal []string, separator ...string) []s
 	}
 
 	return strings.Split(strVal, sep)
+}
+
+// GetEnvAsStringArrTrimmed reads ENV and returns the whitespace trimmed values split by separator.
+func GetEnvAsStringArrTrimmed(key string, defaultVal []string, separator ...string) []string {
+	slc := GetEnvAsStringArr(key, defaultVal, separator...)
+
+	for i := range slc {
+		slc[i] = strings.TrimSpace(slc[i])
+	}
+
+	return slc
 }
 
 func GetEnvAsURL(key string, defaultVal string) *url.URL {
@@ -120,6 +131,47 @@ func GetEnvAsURL(key string, defaultVal string) *url.URL {
 	}
 
 	return u
+}
+
+func GetEnvAsLanguageTag(key string, defaultVal language.Tag) language.Tag {
+	strVal := GetEnv(key, "")
+
+	if len(strVal) == 0 {
+		return defaultVal
+	}
+
+	tag, err := language.Parse(strVal)
+	if err != nil {
+		log.Panic().Str("key", key).Str("strVal", strVal).Err(err).Msg("Failed to parse env variable as language.Tag")
+	}
+
+	return tag
+}
+
+// GetEnvAsLanguageTagArr reads ENV and returns the parsed values as []language.Tag split by separator.
+func GetEnvAsLanguageTagArr(key string, defaultVal []language.Tag, separator ...string) []language.Tag {
+	strVal := GetEnv(key, "")
+
+	if len(strVal) == 0 {
+		return defaultVal
+	}
+
+	sep := ","
+	if len(separator) >= 1 {
+		sep = separator[0]
+	}
+
+	splitString := strings.Split(strVal, sep)
+	res := []language.Tag{}
+	for _, s := range splitString {
+		tag, err := language.Parse(s)
+		if err != nil {
+			log.Panic().Str("key", key).Str("itemVal", s).Err(err).Msg("Failed to parse item value from env variable as language.Tag")
+		}
+		res = append(res, tag)
+	}
+
+	return res
 }
 
 // GetMgmtSecret returns the management secret for the app server, mainly used by health check and readiness endpoints.

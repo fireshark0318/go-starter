@@ -36,7 +36,9 @@ func Init(s *api.Server) {
 	}
 
 	if s.Config.Echo.EnableRecoverMiddleware {
-		s.Echo.Use(echoMiddleware.Recover())
+		s.Echo.Use(echoMiddleware.RecoverWithConfig(echoMiddleware.RecoverConfig{
+			LogErrorFunc: middleware.LogErrorFuncWithRequestInfo,
+		}))
 	} else {
 		log.Warn().Msg("Disabling recover middleware due to environment config")
 	}
@@ -72,6 +74,7 @@ func Init(s *api.Server) {
 			LogRequestQuery:   s.Config.Logger.LogRequestQuery,
 			LogResponseBody:   s.Config.Logger.LogResponseBody,
 			LogResponseHeader: s.Config.Logger.LogResponseHeader,
+			LogCaller:         s.Config.Logger.LogCaller,
 			RequestBodyLogSkipper: func(req *http.Request) bool {
 				// We skip all body logging for auth endpoints as these might contain credentials
 				if strings.HasPrefix(req.URL.Path, "/api/v1/auth") {
@@ -107,6 +110,12 @@ func Init(s *api.Server) {
 		log.Warn().Msg("Disabling CORS middleware due to environment config")
 	}
 
+	if s.Config.Echo.EnableCacheControlMiddleware {
+		s.Echo.Use(middleware.CacheControl())
+	} else {
+		log.Warn().Msg("Disabling cache control middleware due to environment config")
+	}
+
 	if s.Config.Pprof.Enable {
 
 		pprofAuthMiddleware := middleware.Noop()
@@ -114,7 +123,7 @@ func Init(s *api.Server) {
 		if s.Config.Pprof.EnableManagementKeyAuth {
 			pprofAuthMiddleware = echoMiddleware.KeyAuthWithConfig(echoMiddleware.KeyAuthConfig{
 				KeyLookup: "query:mgmt-secret",
-				Validator: func(key string, c echo.Context) (bool, error) {
+				Validator: func(key string, _ echo.Context) (bool, error) {
 					return key == s.Config.Management.Secret, nil
 				},
 			})
@@ -147,10 +156,10 @@ func Init(s *api.Server) {
 		// Unsecured base group available at /**
 		Root: s.Echo.Group(""),
 
-		// Management endpoints, secured by key auth (query param), available at /-/**
+		// Management endpoints, uncacheable, secured by key auth (query param), available at /-/**
 		Management: s.Echo.Group("/-", echoMiddleware.KeyAuthWithConfig(echoMiddleware.KeyAuthConfig{
 			KeyLookup: "query:mgmt-secret",
-			Validator: func(key string, c echo.Context) (bool, error) {
+			Validator: func(key string, _ echo.Context) (bool, error) {
 				return key == s.Config.Management.Secret, nil
 			},
 			Skipper: func(c echo.Context) bool {
@@ -160,7 +169,7 @@ func Init(s *api.Server) {
 				}
 				return false
 			},
-		})),
+		}), middleware.NoCache()),
 
 		// OAuth2, unsecured or secured by bearer auth, available at /api/v1/auth/**
 		APIV1Auth: s.Echo.Group("/api/v1/auth", middleware.AuthWithConfig(middleware.AuthConfig{
