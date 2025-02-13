@@ -19,6 +19,20 @@ import (
 // swagger:model orderDir
 type OrderDir string
 
+func NewOrderDir(value OrderDir) *OrderDir {
+
+	v := value
+	return &v
+=======
+	return &value
+}
+
+// Pointer returns a pointer to a freshly-allocated OrderDir.
+func (m OrderDir) Pointer() *OrderDir {
+	return &m
+
+}
+
 const (
 
 	// OrderDirAsc captures enum value "asc"

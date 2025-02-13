@@ -1,19 +1,19 @@
-// +build scripts
+//go:build scripts
 
 package util
 
 import (
-	"io/ioutil"
 	"log"
+	"os"
 
-	"github.com/rogpeppe/go-internal/modfile"
+	"golang.org/x/mod/modfile"
 )
 
 // GetModuleName returns the current go module's name as defined in the go.mod file.
 // https://stackoverflow.com/questions/53183356/api-to-get-the-module-name
 // https://github.com/rogpeppe/go-internal
 func GetModuleName(absolutePathToGoMod string) (string, error) {
-	dat, err := ioutil.ReadFile(absolutePathToGoMod)
+	dat, err := os.ReadFile(absolutePathToGoMod)
 
 	if err != nil {
 		log.Fatal(err)

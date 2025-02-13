@@ -1,4 +1,4 @@
-// +build scripts
+//go:build scripts
 
 package scaffold
 
@@ -14,7 +14,7 @@ import (
 
 	"allaboutapps.dev/aw/go-starter/internal/util"
 	"github.com/go-openapi/swag"
-	"github.com/rogpeppe/go-internal/modfile"
+	"golang.org/x/mod/modfile"
 )
 
 // Scaffolding tool to auto-generate basic CRUD handlers for a given database model.

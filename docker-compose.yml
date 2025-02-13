@@ -1,4 +1,3 @@
-version: "3.4"
 services:
   service:
     build:
@@ -19,10 +18,19 @@ services:
       # mount cached go pkg downloads
       - go-pkg:/go/pkg
 
+      # speed up tmp dirs in working directory by using separate volumes (not the host's filesystem)
+      - workdir-api-tmp:/app/api/tmp
+      - workdir-bin:/app/bin
+      - workdir-tmp:/app/tmp
+
       # mount cached vscode container extensions
       # https://code.visualstudio.com/docs/remote/containers-advanced#_avoiding-extension-reinstalls-on-container-rebuild
       - vscode-extensions:/home/development/.vscode-server/extensions
       - vscode-extensions-insiders:/home/development/.vscode-server-insiders/extensions
+
+      # https://code.visualstudio.com/remote/advancedcontainers/persist-bash-history
+      # keep user development .bash_history between container restarts
+      - bash-history:/home/development/commandhistory
 
     depends_on:
       - postgres
@@ -67,7 +75,16 @@ services:
       - seccomp:unconfined
 
     # Overrides default command so things don't shut down after the process ends.
-    command: /bin/sh -c "while sleep 1000; do :; done"
+    command:
+      - /bin/sh
+      - -c
+      - |
+        sudo chown -R development:development /app/api/tmp
+        sudo chown -R development:development /app/bin
+        sudo chown -R development:development /app/tmp
+        chmod +x /app/rksh
+        git config --global --add safe.directory /app
+        while sleep 1000; do :; done
 
   postgres:
     image: postgres:12.4-alpine # should be the same version as used in .drone.yml, .github/workflows, Dockerfile and live
@@ -92,9 +109,9 @@ services:
       - pgvolume:/var/lib/postgresql/data
 
   integresql:
-    image: allaboutapps/integresql:1.0.0
-    ports:
-      - "5000:5000"
+    image: ghcr.io/allaboutapps/integresql:v1.1.0
+    expose:
+      - "5000"
     depends_on:
       - postgres
     environment:
@@ -134,7 +151,15 @@ volumes:
   # go: go mod cached downloads
   go-pkg:
 
+  # tmp dirs in workdir
+  workdir-api-tmp:
+  workdir-bin:
+  workdir-tmp:
+
   # vscode: Avoiding extension reinstalls on container rebuild
   # https://code.visualstudio.com/docs/remote/containers-advanced#_avoiding-extension-reinstalls-on-container-rebuild
   vscode-extensions:
   vscode-extensions-insiders:
+
+  # https://code.visualstudio.com/remote/advancedcontainers/persist-bash-history
+  bash-history:

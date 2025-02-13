@@ -1,4 +1,4 @@
-// +build scripts
+//go:build scripts
 
 // This program checks /internal/api/handlers.go and /internal/types/spec_handlers.go
 // It can be invoked by running go run -tags scripts scripts/handlers/check_handlers.go
@@ -114,7 +114,7 @@ func CheckHandlers(printAll bool) {
 	}
 
 	// we have our routes, the server is no longer needed.
-	if err := s.Shutdown(context.Background()); err != nil {
+	if errs := s.Shutdown(context.Background()); len(errs) > 0 {
 		fmt.Println("Failed to stop introspection server")
 	}
 

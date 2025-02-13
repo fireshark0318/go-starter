@@ -12,6 +12,7 @@ import (
 	"sync"
 	"testing"
 
+	"allaboutapps.dev/aw/go-starter/internal/config"
 	pUtil "allaboutapps.dev/aw/go-starter/internal/util"
 	dbutil "allaboutapps.dev/aw/go-starter/internal/util/db"
 	"github.com/allaboutapps/integresql-client-go"
@@ -29,7 +30,7 @@ var (
 	poolHashMap = &sync.Map{} // "poolID" -> "poolHash"
 
 	// we will compute a db template hash over the following dirs/files
-	migDir           = filepath.Join(pUtil.GetProjectRootDir(), "/migrations")
+	migDir           = config.DatabaseMigrationFolder
 	fixFile          = filepath.Join(pUtil.GetProjectRootDir(), "/internal/test/fixtures.go")
 	selfFile         = filepath.Join(pUtil.GetProjectRootDir(), "/internal/test/test_database.go")
 	defaultPoolPaths = []string{migDir, fixFile, selfFile}
@@ -42,6 +43,9 @@ func init() {
 		panic(errors.Wrap(err, "Failed to create new integresql-client"))
 	}
 	client = c
+
+	// pin migrate to use the globally defined `migrations` table identifier
+	migrate.SetTable(config.DatabaseMigrationTable)
 }
 
 // WithTestDatabase returns an isolated test database based on the current migrations and fixtures.
@@ -186,7 +190,7 @@ func WithTestDatabaseEmptyContext(ctx context.Context, t *testing.T, closure fun
 		poolHash := storePoolHash(t, poolID, []string{selfFile})
 
 		// properly build up the template database once (noop)
-		execClosureNewIntegresTemplate(ctx, t, poolHash, func(db *sql.DB) error {
+		execClosureNewIntegresTemplate(ctx, t, poolHash, func(_ *sql.DB) error {
 			t.Helper()
 			return nil
 		})
@@ -290,6 +294,12 @@ func execClosureNewIntegresDatabase(ctx context.Context, t *testing.T, poolHash 
 func ApplyMigrations(t *testing.T, db *sql.DB) (countMigrations int, err error) {
 	t.Helper()
 
+	// In case an old default sql-migrate migration table (named "gorp_migrations") still exists we rename it to the new name equivalent
+	// in sync with the settings in dbconfig.yml and config.DatabaseMigrationTable.
+	if _, err := db.Exec(fmt.Sprintf("ALTER TABLE IF EXISTS gorp_migrations RENAME TO %s;", config.DatabaseMigrationTable)); err != nil {
+		return 0, err
+	}
+
 	migrations := &migrate.FileMigrationSource{Dir: migDir}
 	countMigrations, err = migrate.Exec(db, "postgres", migrations, migrate.Up)
 	if err != nil {
@@ -332,13 +342,13 @@ func ApplyDump(ctx context.Context, t *testing.T, db *sql.DB, dumpFile string) e
 		return err
 	}
 
-	// we need to get the db name before beeing able to do anything.
+	// we need to get the db name before being able to do anything.
 	var targetDB string
-	if err := db.QueryRow("SELECT current_database();").Scan(&targetDB); err != nil {
+	if err := db.QueryRowContext(ctx, "SELECT current_database();").Scan(&targetDB); err != nil {
 		return err
 	}
 
-	cmd := exec.Command("bash", "-c", fmt.Sprintf("cat %q | psql %q", dumpFile, targetDB)) //nolint:gosec
+	cmd := exec.CommandContext(ctx, "bash", "-c", fmt.Sprintf("cat %q | psql %q", dumpFile, targetDB)) //nolint:gosec
 	combinedOutput, err := cmd.CombinedOutput()
 
 	if err != nil {

@@ -68,7 +68,7 @@ func execClosureNewTestServer(ctx context.Context, t *testing.T, config config.S
 
 	s := api.NewServer(config)
 
-	// attach the already initalized db
+	// attach the already initialized db
 	s.DB = db
 
 	if err := s.InitMailer(); err != nil {
@@ -77,6 +77,10 @@ func execClosureNewTestServer(ctx context.Context, t *testing.T, config config.S
 
 	// attach any other mocks
 	s.Push = NewTestPusher(t, db)
+
+	if err := s.InitI18n(); err != nil {
+		t.Fatalf("Failed to init i18n service: %v", err)
+	}
 
 	router.Init(s)
 
