@@ -584,6 +584,10 @@ response := test.RequireHTTPError(t, res, httperrors.ErrNotFoundTokenNotFound)
 
 - Bump [golang from v1.16.2 to v1.16.3](https://github.com/golang/go/issues?q=milestone%3AGo1.16.3+label%3ACherryPickApproved) (requires `./docker-helper.sh --rebuild`).
 
+## Unreleased
+### Changed
+- Bump [github.com/go-swagger v0.26.1 to v0.27.0](https://github.com/go-swagger/go-swagger/releases/tag/v0.27.0)
+
 ## 2021-04-01
 
 ### Changed
